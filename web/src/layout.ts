@@ -9,7 +9,7 @@ export const COUPLE_GAP = 30;
 export const SIBLING_GAP = 30;
 export const BLOCK_GAP = 60;
 /** Height of a couple's arch above leaf centre: the two stems fuse here and children grow from it. */
-export const ARCH_RISE = NODE_H / 2 + 26;
+export const ARCH_RISE = NODE_H / 2 + 18;
 
 export interface LayoutNode {
   id: string;
