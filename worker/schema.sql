@@ -17,7 +17,10 @@ CREATE TABLE IF NOT EXISTS people (
   family_id TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  birth_date TEXT,        -- YYYY-MM-DD
+  death_date TEXT,        -- YYYY-MM-DD, NULL while living
+  gender TEXT             -- 'f' | 'm' | NULL
 );
 CREATE INDEX IF NOT EXISTS idx_people_tree ON people(tree_id);
 CREATE TABLE IF NOT EXISTS families (

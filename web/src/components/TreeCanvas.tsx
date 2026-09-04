@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, type PointerEvent as RPointerEvent } from 'react';
-import { NODE_H, NODE_W, type Layout } from '../layout';
+import { ARCH_RISE, NODE_H, NODE_W, type Layout } from '../layout';
 import type { Person } from '../types';
 import { Leaf } from './Leaf';
 
@@ -14,7 +14,15 @@ interface Props {
   people: Map<string, Person>;
   selectedId: string | null;
   highlightId: string | null;
+  meId: string | null;
+  relations: Map<string, string> | null;
   onSelect: (id: string | null) => void;
+}
+
+/** Centre-line of a branch from (x1,y1) up to (x2,y2): leaves and arrives vertically. */
+function branchPath(x1: number, y1: number, x2: number, y2: number): string {
+  const d = Math.max(30, (y1 - y2) * 0.5);
+  return `M${x1},${y1} C${x1},${y1 - d} ${x2},${y2 + d} ${x2},${y2}`;
 }
 
 interface View {
@@ -35,7 +43,7 @@ const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t 
  * written straight to the DOM so dragging never waits on a React render.
  */
 export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
-  { layout, people, selectedId, highlightId, onSelect },
+  { layout, people, selectedId, highlightId, meId, relations, onSelect },
   ref,
 ) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -278,35 +286,45 @@ export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
           );
         })}
 
+        {layout.couples.map((c) => {
+          // A couple's stems fuse into an arch above their leaves. It's solid
+          // wood like any branch, but paler with a dashed grain so the graft
+          // (not a bloodline) reads at a glance. Children grow from its peak.
+          const left = c.a.x < c.b.x ? c.a : c.b;
+          const right = c.a.x < c.b.x ? c.b : c.a;
+          const yTop = -left.y - NODE_H / 2 + 14; // just inside each leaf's tip
+          const x1 = left.x + 22;
+          const x2 = right.x - 22;
+          const mx = (x1 + x2) / 2;
+          const peak = -left.y - ARCH_RISE;
+          // Quadratic midpoint = ¼P0 + ½C + ¼P2 → choose C so the curve peaks at `peak`.
+          const cy = 2 * peak - yTop;
+          const d = `M${x1},${yTop} Q${mx},${cy} ${x2},${yTop}`;
+          return (
+            <g key={c.familyId} className="bough">
+              <path className="bough-wood" d={d} />
+              <path className="bough-grain" d={d} />
+              <circle cx={mx} cy={peak} r={5.5} className="bough-knot" />
+            </g>
+          );
+        })}
+
         {layout.branches.map((b) => {
           const x1 = b.from.x;
           const y1 = -b.from.y;
           const x2 = b.to.x;
           const y2 = -b.to.y;
-          const d = (y1 - y2) * 0.55;
-          const width = Math.max(3, 11 - b.depth * 2.2);
+          const w1 = Math.max(5, 14 - b.depth * 2.2);
+          const w2 = Math.max(3, w1 * 0.5);
+          const d = branchPath(x1, y1, x2, y2);
+          // Stepped taper: the full length thin, then thicker strokes over the
+          // first parts. Works at any angle, unlike an offset outline.
           return (
-            <path
-              key={`${b.familyId}-${b.childId}`}
-              className="branch"
-              strokeWidth={width}
-              d={`M${x1},${y1} C${x1},${y1 - d} ${x2},${y2 + d} ${x2},${y2}`}
-            />
-          );
-        })}
-
-        {layout.couples.map((c) => {
-          const left = c.a.x < c.b.x ? c.a : c.b;
-          const right = c.a.x < c.b.x ? c.b : c.a;
-          return (
-            <line
-              key={c.familyId}
-              className="couple-line"
-              x1={left.x + 56}
-              y1={-left.y + 6}
-              x2={right.x - 56}
-              y2={-right.y + 6}
-            />
+            <g key={`${b.familyId}-${b.childId}`} className="branch">
+              <path d={d} strokeWidth={w2} />
+              <path d={d} strokeWidth={(w1 + w2) / 2} pathLength={1} strokeDasharray="0.62 1" />
+              <path d={d} strokeWidth={w1} pathLength={1} strokeDasharray="0.3 1" />
+            </g>
           );
         })}
 
@@ -320,6 +338,8 @@ export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
               person={person}
               selected={selectedId === n.id}
               highlight={highlightId === n.id}
+              isMe={meId === n.id}
+              relation={relations?.get(n.id)}
             />
           );
         })}

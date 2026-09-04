@@ -21,8 +21,8 @@ export function TreeList() {
   return (
     <div className="list-page">
       <header className="list-header">
-        <div className="eyebrow">Family trees</div>
-        <h1>Traiger Tree</h1>
+        <div className="eyebrow">Shared trees</div>
+        <h1>Family Tree Builder</h1>
         <p>Start a tree for your family, or open one someone has already planted.</p>
       </header>
 

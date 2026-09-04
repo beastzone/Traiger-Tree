@@ -28,3 +28,23 @@ export function saveToken(treeId: string, token: string | null): void {
     /* private mode etc. */
   }
 }
+
+const ME_PREFIX = 'traiger-tree:me:';
+
+/** Which person this device treats as "you" in a given tree. */
+export function loadMe(treeId: string): string | null {
+  try {
+    return localStorage.getItem(ME_PREFIX + treeId);
+  } catch {
+    return null;
+  }
+}
+
+export function saveMe(treeId: string, personId: string | null): void {
+  try {
+    if (personId) localStorage.setItem(ME_PREFIX + treeId, personId);
+    else localStorage.removeItem(ME_PREFIX + treeId);
+  } catch {
+    /* ignore */
+  }
+}

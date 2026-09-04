@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { yearsLabel } from '../dates';
+import { phrase } from '../kinship';
 import type { Person } from '../types';
 import { Avatar } from './Avatar';
 import { IconClose, IconSearch } from './Icons';
 
 interface Props {
   people: Person[];
+  relations?: Map<string, string> | null;
   onPick: (id: string) => void;
 }
 
-export function SearchBar({ people, onPick }: Props) {
+export function SearchBar({ people, relations, onPick }: Props) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -105,7 +108,14 @@ export function SearchBar({ people, onPick }: Props) {
               onClick={() => choose(p)}
             >
               <Avatar name={p.name} photo={p.photo} />
-              <span>{p.name}</span>
+              <span>
+                {p.name}
+                {(yearsLabel(p.birthDate, p.deathDate) || relations?.get(p.id)) && (
+                  <span className="sub">
+                    {[yearsLabel(p.birthDate, p.deathDate), phrase(relations?.get(p.id))].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+              </span>
             </button>
           ))}
         </div>

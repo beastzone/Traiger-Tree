@@ -7,11 +7,13 @@ import { PersonForm } from '../components/PersonForm';
 import { SearchBar } from '../components/SearchBar';
 import { Confirm, Sheet } from '../components/Sheet';
 import { TreeCanvas, type CanvasHandle } from '../components/TreeCanvas';
+import { lifeSummary } from '../dates';
+import { phrase, relationMap } from '../kinship';
 import { layoutTree } from '../layout';
 import * as M from '../mutations';
 import { useTreeStore, type SaveStatus } from '../store';
-import type { Changes, Person, TreeData } from '../types';
-import { loadToken, saveToken } from '../util';
+import type { Changes, Person, PersonInput, TreeData } from '../types';
+import { loadMe, loadToken, saveMe, saveToken } from '../util';
 
 type SheetState =
   | { kind: 'password' }
@@ -35,6 +37,7 @@ export function TreePage({ id, mode }: Props) {
   const editing = mode === 'edit';
 
   const canvas = useRef<CanvasHandle>(null);
+  const [meId, setMeIdState] = useState<string | null>(() => loadMe(id));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
@@ -47,6 +50,15 @@ export function TreePage({ id, mode }: Props) {
     [data],
   );
   const peopleMap = useMemo(() => new Map((data?.people ?? []).map((p) => [p.id, p])), [data]);
+  const relations = useMemo(() => (data && meId && peopleMap.has(meId) ? relationMap(data, meId) : null), [data, meId, peopleMap]);
+
+  const setMe = useCallback(
+    (pid: string | null) => {
+      setMeIdState(pid);
+      saveMe(id, pid);
+    },
+    [id],
+  );
 
   // Ask for the password when editing a protected tree without a token.
   useEffect(() => {
@@ -104,24 +116,24 @@ export function TreePage({ id, mode }: Props) {
     setSheet(null);
   };
 
-  const submitForm = (name: string, photo: string | null) => {
+  const submitForm = (input: PersonInput) => {
     if (!sheet || sheet.kind !== 'form') return;
     const s = sheet;
     switch (s.mode) {
       case 'root':
-        applyAndFocus((d) => M.addRoot(d, name, photo));
+        applyAndFocus((d) => M.addRoot(d, input));
         break;
       case 'partner':
-        applyAndFocus((d) => M.addPartner(d, s.personId!, name, photo));
+        applyAndFocus((d) => M.addPartner(d, s.personId!, input));
         break;
       case 'child':
-        applyAndFocus((d) => M.addChild(d, s.personId!, name, photo, s.familyId));
+        applyAndFocus((d) => M.addChild(d, s.personId!, input, s.familyId));
         break;
       case 'parent':
-        applyAndFocus((d) => M.addParent(d, s.personId!, name, photo));
+        applyAndFocus((d) => M.addParent(d, s.personId!, input));
         break;
       case 'edit':
-        store.apply((d) => M.updatePerson(d, s.personId!, { name, photo }));
+        store.apply((d) => M.updatePerson(d, s.personId!, input));
         setSheet({ kind: 'person', id: s.personId! });
         break;
     }
@@ -158,6 +170,8 @@ export function TreePage({ id, mode }: Props) {
         people={peopleMap}
         selectedId={selectedId}
         highlightId={highlightId}
+        meId={meId}
+        relations={relations}
         onSelect={select}
       />
 
@@ -189,7 +203,7 @@ export function TreePage({ id, mode }: Props) {
         </div>
         {!empty && (
           <div style={{ display: 'flex', marginTop: 8 }}>
-            <SearchBar people={data.people} onPick={goTo} />
+            <SearchBar people={data.people} relations={relations} onPick={goTo} />
           </div>
         )}
       </div>
@@ -250,6 +264,9 @@ export function TreePage({ id, mode }: Props) {
             data={data}
             person={selected}
             editing={editing}
+            isMe={meId === selected.id}
+            relation={relations?.get(selected.id)}
+            onSetMe={(v) => setMe(v ? selected.id : null)}
             onGoTo={(pid) => {
               select(pid);
               goTo(pid);
@@ -271,8 +288,7 @@ export function TreePage({ id, mode }: Props) {
         <Sheet onClose={closeSheet}>
           <PersonForm
             {...formCopy(sheet.mode, sheet.personId ? peopleMap.get(sheet.personId) : undefined, sheet.familyId, data)}
-            initialName={sheet.mode === 'edit' ? peopleMap.get(sheet.personId!)?.name : ''}
-            initialPhoto={sheet.mode === 'edit' ? peopleMap.get(sheet.personId!)?.photo : null}
+            initial={sheet.mode === 'edit' ? peopleMap.get(sheet.personId!) : undefined}
             onSubmit={submitForm}
             onCancel={sheet.mode === 'edit' ? () => setSheet({ kind: 'person', id: sheet.personId! }) : closeSheet}
           />
@@ -394,6 +410,9 @@ interface DetailsProps {
   data: TreeData;
   person: Person;
   editing: boolean;
+  isMe: boolean;
+  relation?: string;
+  onSetMe: (isMe: boolean) => void;
   onGoTo: (id: string) => void;
   onShow: () => void;
   onEdit: () => void;
@@ -403,7 +422,8 @@ interface DetailsProps {
   onDelete: () => void;
 }
 
-function PersonDetails({ data, person, editing, onGoTo, onShow, onEdit, onAddPartner, onAddChild, onAddParent, onDelete }: DetailsProps) {
+function PersonDetails({ data, person, editing, isMe, relation, onSetMe, onGoTo, onShow, onEdit, onAddPartner, onAddChild, onAddParent, onDelete }: DetailsProps) {
+  const life = lifeSummary(person.birthDate, person.deathDate);
   const parents = M.parentsOf(data, person.id);
   const partners = M.partnersOf(data, person.id);
   const children = M.familiesOf(data, person.id).flatMap((f) => M.childrenOf(data, f.id));
@@ -425,9 +445,15 @@ function PersonDetails({ data, person, editing, onGoTo, onShow, onEdit, onAddPar
         <Avatar name={person.name} photo={person.photo} size="lg" />
         <div>
           <h2>{person.name}</h2>
-          <div className="rel">
-            {M.isRoot(data, person.id) ? 'Root of the tree' : parents.length ? `Child of ${parents.map((p) => p.name).join(' & ')}` : ''}
-          </div>
+          {(life.age || life.dates) && (
+            <div className="life">
+              {life.age && <span className="age">{life.age}</span>}
+              {life.age && life.dates && ' · '}
+              {life.dates}
+            </div>
+          )}
+          {!isMe && relation && <div className="relation-pill">{phrase(relation)}</div>}
+          {isMe && <div className="relation-pill">This is you</div>}
         </div>
       </div>
       <ul className="relations">
@@ -451,6 +477,9 @@ function PersonDetails({ data, person, editing, onGoTo, onShow, onEdit, onAddPar
         )}
       </ul>
       <div className="actions">
+        <button className="btn btn-me" onClick={() => onSetMe(!isMe)}>
+          {isMe ? "That's not me" : 'This is me'}
+        </button>
         {editing ? (
           <>
             <button className="btn btn-primary" onClick={onAddChild}>

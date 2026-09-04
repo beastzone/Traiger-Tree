@@ -5,9 +5,11 @@ import type { Family, Person } from './types';
 export const NODE_W = 120;
 export const NODE_H = 150;
 export const LEVEL_H = 235;
-export const COUPLE_GAP = 22;
+export const COUPLE_GAP = 30;
 export const SIBLING_GAP = 30;
 export const BLOCK_GAP = 60;
+/** Height of a couple's arch above leaf centre: the two stems fuse here and children grow from it. */
+export const ARCH_RISE = NODE_H / 2 + 26;
 
 export interface LayoutNode {
   id: string;
@@ -121,12 +123,16 @@ export function layoutTree(people: Person[], families: Family[], rootId: string 
     }
     const me = nodes.get(u.person)!;
 
-    // Family anchors: midpoint of the couple, or directly under a single parent.
+    // Family anchors: for a couple, the peak of the arch that joins the two
+    // leaves above them; for a single parent, the leaf's tip.
     for (const b of u.blocks) {
       const partnerNode = b.partner ? nodes.get(b.partner) : undefined;
-      const ax = partnerNode ? (me.x + partnerNode.x) / 2 : me.x;
-      anchors.set(b.family.id, { x: ax, y: y + NODE_H / 2 });
-      if (partnerNode) couples.push({ familyId: b.family.id, a: me, b: partnerNode });
+      if (partnerNode) {
+        anchors.set(b.family.id, { x: (me.x + partnerNode.x) / 2, y: y + ARCH_RISE });
+        couples.push({ familyId: b.family.id, a: me, b: partnerNode });
+      } else {
+        anchors.set(b.family.id, { x: me.x, y: y + NODE_H / 2 });
+      }
     }
 
     let cx = left + (u.width - u.childrenWidth) / 2;

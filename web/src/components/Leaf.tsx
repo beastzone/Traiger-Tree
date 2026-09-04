@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { LayoutNode } from '../layout';
+import { NODE_W, type LayoutNode } from '../layout';
 import type { Person } from '../types';
 import { initials } from './Avatar';
 
@@ -45,18 +45,52 @@ function wrapName(name: string, maxChars = 15): string[] {
   return lines.map((l) => (l.length > maxChars + 2 ? `${l.slice(0, maxChars + 1)}…` : l));
 }
 
+/** A New England fall orange for the leaf that is "you". */
+export const ME_COLORS = { fill: 'hsl(26 72% 54%)', stroke: 'hsl(22 70% 36%)' };
+
+const TAG_FONT = 10.5;
+const TAG_MAX_W = NODE_W - 4;
+
+/** Fit a relation phrase into a tag of at most two lines. */
+function fitTag(text: string): { lines: string[]; width: number } {
+  const perChar = TAG_FONT * 0.56;
+  const pad = 16;
+  const maxChars = Math.floor((TAG_MAX_W - pad) / perChar);
+  const lines: string[] = [];
+  let cur = '';
+  for (const w of text.split(' ')) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (next.length <= maxChars || !cur) cur = next;
+    else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  if (lines.length > 2) {
+    lines.length = 2;
+    lines[1] = `${lines[1].slice(0, maxChars - 1)}…`;
+  }
+  const longest = Math.max(...lines.map((l) => l.length));
+  return { lines, width: Math.max(40, Math.min(TAG_MAX_W, longest * perChar + pad)) };
+}
+
 interface Props {
   node: LayoutNode;
   person: Person;
   selected: boolean;
   highlight: boolean;
+  isMe: boolean;
+  /** "first cousin once removed" etc., shown as a tag at the stem when someone is "you". */
+  relation?: string;
 }
 
-export const Leaf = memo(function Leaf({ node, person, selected, highlight }: Props) {
-  const { fill, stroke } = leafColors(person.id);
+export const Leaf = memo(function Leaf({ node, person, selected, highlight, isMe, relation }: Props) {
+  const { fill, stroke } = isMe ? ME_COLORS : leafColors(person.id);
   const lines = wrapName(person.name);
   const clipId = `clip-${person.id}`;
-  const cls = `leaf${selected ? ' selected' : ''}${highlight ? ' highlight' : ''}`;
+  const cls = `leaf${selected ? ' selected' : ''}${highlight ? ' highlight' : ''}${isMe ? ' me' : ''}`;
+  const tag = relation && !isMe ? fitTag(relation) : null;
 
   return (
     <g
@@ -100,6 +134,31 @@ export const Leaf = memo(function Leaf({ node, person, selected, highlight }: Pr
           </tspan>
         ))}
       </text>
+
+      {isMe && (
+        <text className="leaf-you" x="0" y={lines.length > 1 ? 62 : 54}>
+          you
+        </text>
+      )}
+
+      {tag && (
+        <g className="leaf-tag" transform="translate(0 84)">
+          <rect
+            x={-tag.width / 2}
+            y={-9}
+            width={tag.width}
+            height={tag.lines.length > 1 ? 30 : 18}
+            rx={9}
+          />
+          <text x="0" y={tag.lines.length > 1 ? -3 : 0.5}>
+            {tag.lines.map((l, i) => (
+              <tspan key={i} x="0" dy={i === 0 ? 0 : 12}>
+                {l}
+              </tspan>
+            ))}
+          </text>
+        </g>
+      )}
     </g>
   );
 });
