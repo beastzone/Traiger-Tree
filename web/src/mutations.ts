@@ -99,17 +99,24 @@ export function addPartner(data: TreeData, personId: string, input: PersonInput)
  * Add a child to a person. When the person is in several couples the caller
  * must say which one via `familyId`.
  */
-export function addChild(data: TreeData, personId: string, input: PersonInput, familyId?: string): Result {
+export function addChild(
+  data: TreeData,
+  personId: string,
+  input: PersonInput,
+  familyId?: string | 'new',
+): Result {
   const changes = emptyChanges();
   let families = data.families;
-  let family = familyId ? familyById(data, familyId) : undefined;
-  if (!family) {
+  let family = familyId && familyId !== 'new' ? familyById(data, familyId) : undefined;
+  if (!family && familyId !== 'new') {
     const mine = familiesOf(data, personId);
     if (mine.length === 1) family = mine[0];
     else if (mine.length > 1) throw new Error('choose which couple the child belongs to');
   }
   if (!family) {
-    family = { id: newId(), partnerA: personId, partnerB: null, sortOrder: 0 };
+    // A family of their own (the other parent isn't in the tree).
+    const mine = familiesOf(data, personId);
+    family = { id: newId(), partnerA: personId, partnerB: null, sortOrder: mine.reduce((m, f) => Math.max(m, f.sortOrder + 1), 0) };
     families = [...families, family];
     changes.families.set(family.id, family);
   }
@@ -123,15 +130,41 @@ export function addChild(data: TreeData, personId: string, input: PersonInput, f
   return { data: { ...data, people: [...data.people, child], families }, changes };
 }
 
-/** Grow the tree downward (toward the roots): give the root a parent. */
+/** Can this person be given a parent? True with no parents, or with one parent and room for the other. */
+export function canAddParent(data: TreeData, personId: string): boolean {
+  const me = personById(data, personId);
+  if (!me) return false;
+  if (!me.familyId) return true;
+  const fam = familyById(data, me.familyId);
+  return !!fam && (!fam.partnerA || !fam.partnerB);
+}
+
+/**
+ * Give someone a parent. With no parents yet this starts a new lineage (for
+ * the root, the new parent becomes the root; for a married-in person, their
+ * family tree grows beside the main one). With one parent already, this fills
+ * in the other.
+ */
 export function addParent(data: TreeData, personId: string, input: PersonInput): Result {
   const me = personById(data, personId);
-  if (!me || me.familyId) throw new Error('only a person without parents can be given one');
+  if (!me) throw new Error('person not found');
   const changes = emptyChanges();
   const parent = blank(input, null, 0);
+  changes.people.set(parent.id, parent);
+
+  if (me.familyId) {
+    const fam = familyById(data, me.familyId);
+    if (!fam || (fam.partnerA && fam.partnerB)) throw new Error('both parents are already in the tree');
+    const updated: Family = fam.partnerA ? { ...fam, partnerB: parent.id } : { ...fam, partnerA: parent.id };
+    changes.families.set(updated.id, updated);
+    return {
+      data: { ...data, people: [...data.people, parent], families: data.families.map((f) => (f.id === fam.id ? updated : f)) },
+      changes,
+    };
+  }
+
   const fam: Family = { id: newId(), partnerA: parent.id, partnerB: null, sortOrder: 0 };
   const updatedMe: Person = { ...me, familyId: fam.id };
-  changes.people.set(parent.id, parent);
   changes.people.set(updatedMe.id, updatedMe);
   changes.families.set(fam.id, fam);
   const people = data.people.map((p) => (p.id === me.id ? updatedMe : p)).concat(parent);
@@ -156,6 +189,8 @@ interface DeletePlan {
   people: Set<string>;
   families: Set<string>;
   familyUpdates: Map<string, Family>;
+  /** People who lose their parents but stay, because a partner keeps them in the tree. */
+  detached: Set<string>;
   newRootId: string | null | undefined;
 }
 
@@ -168,7 +203,20 @@ export function planDelete(data: TreeData, id: string): DeletePlan {
   const people = new Set<string>([id]);
   const families = new Set<string>();
   const familyUpdates = new Map<string, Family>();
+  const detached = new Set<string>();
   const queue = [id];
+
+  // Does this person stay connected to the tree through a partner whose own
+  // parents (or root status) survive? Then losing their parents shouldn't
+  // delete them — they just become a married-in person again.
+  const anchoredByPartner = (pid: string): boolean =>
+    familiesOf(data, pid).some((f) => {
+      const other = partnerIn(data, f, pid);
+      if (!other || people.has(other.id)) return false;
+      if (data.tree.rootId === other.id) return true;
+      return !!other.familyId && !families.has(other.familyId) && !!familyById(data, other.familyId);
+    });
+
   while (queue.length) {
     const pid = queue.pop()!;
     for (const f of familiesOf(data, pid)) {
@@ -182,7 +230,9 @@ export function planDelete(data: TreeData, id: string): DeletePlan {
         families.add(f.id);
         familyUpdates.delete(f.id);
         for (const child of childrenOf(data, f.id)) {
-          if (!people.has(child.id)) {
+          if (people.has(child.id) || detached.has(child.id)) continue;
+          if (anchoredByPartner(child.id)) detached.add(child.id);
+          else {
             people.add(child.id);
             queue.push(child.id);
           }
@@ -205,7 +255,7 @@ export function planDelete(data: TreeData, id: string): DeletePlan {
       newRootId = remaining[0]?.id ?? null;
     }
   }
-  return { people, families, familyUpdates, newRootId };
+  return { people, families, familyUpdates, detached, newRootId };
 }
 
 export function deletePerson(data: TreeData, id: string): Result {
@@ -214,6 +264,15 @@ export function deletePerson(data: TreeData, id: string): Result {
   for (const pid of plan.people) changes.people.set(pid, null);
   for (const fid of plan.families) changes.families.set(fid, null);
   for (const [fid, f] of plan.familyUpdates) changes.families.set(fid, f);
+  const detachedPeople = new Map<string, Person>();
+  for (const pid of plan.detached) {
+    const p = personById(data, pid);
+    if (p) {
+      const updated = { ...p, familyId: null };
+      detachedPeople.set(pid, updated);
+      changes.people.set(pid, updated);
+    }
+  }
   let tree = data.tree;
   if (plan.newRootId !== undefined) {
     tree = { ...tree, rootId: plan.newRootId };
@@ -223,7 +282,7 @@ export function deletePerson(data: TreeData, id: string): Result {
     data: {
       ...data,
       tree,
-      people: data.people.filter((p) => !plan.people.has(p.id)),
+      people: data.people.filter((p) => !plan.people.has(p.id)).map((p) => detachedPeople.get(p.id) ?? p),
       families: data.families.filter((f) => !plan.families.has(f.id)).map((f) => plan.familyUpdates.get(f.id) ?? f),
     },
     changes,

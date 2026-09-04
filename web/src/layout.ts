@@ -32,27 +32,37 @@ export interface BranchLink {
   depth: number;
 }
 
+export interface Anchor {
+  x: number;
+  y: number;
+  depth: number;
+}
+
 export interface Layout {
   nodes: Map<string, LayoutNode>;
   couples: CoupleLink[];
   branches: BranchLink[];
-  /** Where a new child would sprout from, per family. */
-  anchors: Map<string, { x: number; y: number }>;
+  /** Where a family's children sprout from. */
+  anchors: Map<string, Anchor>;
   bounds: { minX: number; maxX: number; minY: number; maxY: number };
+  /** People with a trunk under them: the main root plus the root of each in-law lineage. */
   roots: string[];
 }
 
+/**
+ * A "unit" is a couple cluster (a person, their partners, their partners'
+ * other partners…) on one level, with each family's children hanging above.
+ */
 interface Unit {
-  person: string;
-  /** Person plus adjacent partners, left to right. */
   slots: string[];
-  blocks: { family: Family; partner: string | null; children: Unit[] }[];
+  blocks: { family: Family; children: Unit[] }[];
   width: number;
   childrenWidth: number;
 }
 
 export function layoutTree(people: Person[], families: Family[], rootId: string | null): Layout {
   const byId = new Map(people.map((p) => [p.id, p]));
+  const famById = new Map(families.map((f) => [f.id, f]));
   const sortP = (a: Person, b: Person) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name);
   const sortF = (a: Family, b: Family) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id);
 
@@ -64,32 +74,79 @@ export function layoutTree(people: Person[], families: Family[], rootId: string 
     }
   }
   for (const p of people) {
-    if (p.familyId) childrenOf.set(p.familyId, [...(childrenOf.get(p.familyId) ?? []), p]);
+    if (p.familyId && famById.has(p.familyId)) childrenOf.set(p.familyId, [...(childrenOf.get(p.familyId) ?? []), p]);
   }
   for (const list of familiesOf.values()) list.sort(sortF);
   for (const list of childrenOf.values()) list.sort(sortP);
 
-  const claimed = new Set<string>();
+  const otherPartner = (f: Family, pid: string) => (f.partnerA === pid ? f.partnerB : f.partnerA);
+  const parentsOf = (pid: string): string[] => {
+    const f = byId.get(pid)?.familyId;
+    const fam = f ? famById.get(f) : undefined;
+    return fam ? [fam.partnerA, fam.partnerB].filter((x): x is string => !!x && byId.has(x)) : [];
+  };
 
-  function build(pid: string): Unit {
+  const claimed = new Set<string>();
+  const nodes = new Map<string, LayoutNode>();
+  const couples: CoupleLink[] = [];
+  const branches: BranchLink[] = [];
+  const anchors = new Map<string, Anchor>();
+  const roots: string[] = [];
+  /** depth → occupied x-intervals of placed leaves, for collision checks. */
+  const occupied = new Map<number, [number, number][]>();
+
+  // ---- build ---------------------------------------------------------------
+
+  function buildCluster(pid: string): string[] {
     claimed.add(pid);
-    const fams = familiesOf.get(pid) ?? [];
-    const slots: string[] = [pid];
-    const blocks: Unit['blocks'] = [];
-    fams.forEach((f, i) => {
-      const other = f.partnerA === pid ? f.partnerB : f.partnerA;
-      let partner: string | null = null;
+    const order = [pid];
+    const grow = (person: string, side: 'left' | 'right') => {
+      for (const f of familiesOf.get(person) ?? []) {
+        const other = otherPartner(f, person);
+        if (other && byId.has(other) && !claimed.has(other)) {
+          claimed.add(other);
+          if (side === 'left') order.unshift(other);
+          else order.push(other);
+          grow(other, side);
+        }
+      }
+    };
+    (familiesOf.get(pid) ?? []).forEach((f, i) => {
+      const other = otherPartner(f, pid);
       if (other && byId.has(other) && !claimed.has(other)) {
         claimed.add(other);
-        partner = other;
-        // First partner sits to the left, later ones to the right.
-        if (i === 0) slots.unshift(other);
-        else slots.push(other);
+        const side = i === 0 ? 'left' : 'right';
+        if (side === 'left') order.unshift(other);
+        else order.push(other);
+        grow(other, side);
       }
-      const kids = (childrenOf.get(f.id) ?? []).filter((k) => !claimed.has(k.id)).map((k) => build(k.id));
-      blocks.push({ family: f, partner, children: kids });
     });
-    const unit: Unit = { person: pid, slots, blocks, width: 0, childrenWidth: 0 };
+    return order;
+  }
+
+  function build(pid: string): Unit {
+    const slots = buildCluster(pid);
+    const slotIndex = new Map(slots.map((s, i) => [s, i]));
+    // Every family with a partner in this cluster, ordered by where it sits.
+    const seen = new Set<string>();
+    const fams: Family[] = [];
+    for (const s of slots) {
+      for (const f of familiesOf.get(s) ?? []) {
+        if (!seen.has(f.id)) {
+          seen.add(f.id);
+          fams.push(f);
+        }
+      }
+    }
+    const pos = (f: Family) =>
+      Math.min(...[f.partnerA, f.partnerB].map((p) => (p && slotIndex.has(p) ? slotIndex.get(p)! : Infinity)));
+    fams.sort((a, b) => pos(a) - pos(b) || sortF(a, b));
+
+    const blocks: Unit['blocks'] = fams.map((f) => ({
+      family: f,
+      children: (childrenOf.get(f.id) ?? []).filter((k) => !claimed.has(k.id)).map((k) => build(k.id)),
+    }));
+    const unit: Unit = { slots, blocks, width: 0, childrenWidth: 0 };
     measure(unit);
     return unit;
   }
@@ -108,31 +165,38 @@ export function layoutTree(people: Person[], families: Family[], rootId: string 
     u.width = Math.max(unitWidth, cw);
   }
 
-  const nodes = new Map<string, LayoutNode>();
-  const couples: CoupleLink[] = [];
-  const branches: BranchLink[] = [];
-  const anchors = new Map<string, { x: number; y: number }>();
+  // ---- place ---------------------------------------------------------------
 
-  function place(u: Unit, left: number, depth: number) {
+  interface Placed {
+    nodeIds: string[];
+    familyIds: string[];
+    coupleFrom: number;
+    branchFrom: number;
+  }
+
+  function place(u: Unit, left: number, depth: number, out: Placed) {
     const y = depth * LEVEL_H;
     const unitWidth = u.slots.length * NODE_W + (u.slots.length - 1) * COUPLE_GAP;
     let sx = left + (u.width - unitWidth) / 2 + NODE_W / 2;
     for (const pid of u.slots) {
       nodes.set(pid, { id: pid, x: sx, y, depth });
+      out.nodeIds.push(pid);
       sx += NODE_W + COUPLE_GAP;
     }
-    const me = nodes.get(u.person)!;
 
-    // Family anchors: for a couple, the peak of the arch that joins the two
-    // leaves above them; for a single parent, the leaf's tip.
+    // Family anchors: a couple's arch peak; a single parent's leaf tip.
     for (const b of u.blocks) {
-      const partnerNode = b.partner ? nodes.get(b.partner) : undefined;
-      if (partnerNode) {
-        anchors.set(b.family.id, { x: (me.x + partnerNode.x) / 2, y: y + ARCH_RISE });
-        couples.push({ familyId: b.family.id, a: me, b: partnerNode });
+      const f = b.family;
+      const a = f.partnerA && nodes.has(f.partnerA) && u.slots.includes(f.partnerA) ? nodes.get(f.partnerA)! : null;
+      const c = f.partnerB && nodes.has(f.partnerB) && u.slots.includes(f.partnerB) ? nodes.get(f.partnerB)! : null;
+      if (a && c) {
+        anchors.set(f.id, { x: (a.x + c.x) / 2, y: y + ARCH_RISE, depth });
+        couples.push({ familyId: f.id, a, b: c });
       } else {
-        anchors.set(b.family.id, { x: me.x, y: y + NODE_H / 2 });
+        const solo = a ?? c;
+        if (solo) anchors.set(f.id, { x: solo.x, y: y + NODE_H / 2, depth });
       }
+      if (anchors.has(f.id)) out.familyIds.push(f.id);
     }
 
     let cx = left + (u.width - u.childrenWidth) / 2;
@@ -141,39 +205,148 @@ export function layoutTree(people: Person[], families: Family[], rootId: string 
       if (b.children.length === 0) continue;
       if (!first) cx += BLOCK_GAP;
       first = false;
-      const anchor = anchors.get(b.family.id)!;
+      const anchor = anchors.get(b.family.id);
       b.children.forEach((c, i) => {
         if (i) cx += SIBLING_GAP;
-        place(c, cx, depth + 1);
-        const cn = nodes.get(c.person)!;
-        branches.push({
-          familyId: b.family.id,
-          childId: c.person,
-          from: anchor,
-          to: { x: cn.x, y: cn.y - NODE_H / 2 },
-          depth,
-        });
+        place(c, cx, depth + 1, out);
+        if (anchor) {
+          const cn = nodes.get(c.slots[0])!;
+          const child = c.slots.find((s) => byId.get(s)?.familyId === b.family.id) ?? c.slots[0];
+          const node = nodes.get(child) ?? cn;
+          branches.push({
+            familyId: b.family.id,
+            childId: child,
+            from: anchor,
+            to: { x: node.x, y: node.y - NODE_H / 2 },
+            depth,
+          });
+        }
         cx += c.width;
       });
     }
   }
 
-  // The root first, then any people the root can't reach (each becomes its own
-  // small tree to the right) so nothing is ever invisible.
-  const roots: string[] = [];
-  const order: string[] = [];
-  if (rootId && byId.has(rootId)) order.push(rootId);
-  for (const p of [...people].sort(sortP)) if (!p.familyId) order.push(p.id);
-  for (const p of [...people].sort(sortP)) order.push(p.id);
+  function translate(p: Placed, dx: number) {
+    if (!dx) return;
+    for (const id of p.nodeIds) {
+      const n = nodes.get(id)!;
+      n.x += dx;
+    }
+    for (const fid of p.familyIds) anchors.get(fid)!.x += dx;
+    for (let i = p.branchFrom; i < branches.length; i++) {
+      branches[i].from = { ...branches[i].from, x: branches[i].from.x + dx };
+      branches[i].to = { ...branches[i].to, x: branches[i].to.x + dx };
+    }
+    // Couple links reference node objects, so they move with them.
+  }
 
-  let left = 0;
-  for (const pid of order) {
-    if (claimed.has(pid)) continue;
-    const unit = build(pid);
-    if (roots.length) left += BLOCK_GAP * 2;
-    place(unit, left, 0);
-    left += unit.width;
-    roots.push(pid);
+  function occupy(p: Placed) {
+    for (const id of p.nodeIds) {
+      const n = nodes.get(id)!;
+      const list = occupied.get(n.depth) ?? [];
+      list.push([n.x - NODE_W / 2, n.x + NODE_W / 2]);
+      occupied.set(n.depth, list);
+    }
+  }
+
+  function fits(p: Placed, dx: number): boolean {
+    for (const id of p.nodeIds) {
+      const n = nodes.get(id)!;
+      const lo = n.x + dx - NODE_W / 2;
+      const hi = n.x + dx + NODE_W / 2;
+      for (const [a, b] of occupied.get(n.depth) ?? []) {
+        if (!(hi + SIBLING_GAP <= a || b + SIBLING_GAP <= lo)) return false;
+      }
+    }
+    return true;
+  }
+
+  /** Place a unit as its own block, as close to `desiredLeft` as the others allow. */
+  function placeBlock(u: Unit, depth: number, desiredLeft: number, anchorHint?: { familyId: string; x: number }) {
+    const out: Placed = { nodeIds: [], familyIds: [], coupleFrom: couples.length, branchFrom: branches.length };
+    place(u, 0, depth, out);
+    // Where would we like to be? Under the person this lineage connects to, if given.
+    let want = desiredLeft;
+    if (anchorHint && anchors.has(anchorHint.familyId)) want = anchorHint.x - anchors.get(anchorHint.familyId)!.x;
+    let chosen: number | null = null;
+    const step = 24;
+    for (let k = 0; k < 600 && chosen === null; k++) {
+      for (const cand of k === 0 ? [want] : [want + k * step, want - k * step]) {
+        if (fits(out, cand)) {
+          chosen = cand;
+          break;
+        }
+      }
+    }
+    if (chosen === null) chosen = extentRight() + BLOCK_GAP * 2;
+    translate(out, chosen);
+    occupy(out);
+    roots.push(u.slots[0]);
+  }
+
+  function extentRight(): number {
+    let max = -Infinity;
+    for (const n of nodes.values()) max = Math.max(max, n.x + NODE_W / 2);
+    return Number.isFinite(max) ? max : 0;
+  }
+
+  /** The most distant ancestor of `pid` (deepest lineage root) and how many generations up it is. */
+  function topmost(pid: string): { id: string; up: number } {
+    let best = { id: pid, up: 0 };
+    const seen = new Set([pid]);
+    const queue: { id: string; up: number }[] = [{ id: pid, up: 0 }];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      if (cur.up > best.up) best = cur;
+      for (const par of parentsOf(cur.id)) {
+        if (!seen.has(par) && !claimed.has(par)) {
+          seen.add(par);
+          queue.push({ id: par, up: cur.up + 1 });
+        }
+      }
+    }
+    return best;
+  }
+
+  // 1. The main tree.
+  const mainRoot = rootId && byId.has(rootId) ? rootId : [...people].sort(sortP).find((p) => !p.familyId)?.id ?? people[0]?.id;
+  if (mainRoot) placeBlock(build(mainRoot), 0, 0);
+
+  // 2. Lineages of married-in people: whoever has parents that aren't placed
+  //    yet gets their family tree laid out beside the main one, one generation
+  //    down, as near as possible to them.
+  let progress = true;
+  while (progress) {
+    progress = false;
+    for (const n of [...nodes.values()]) {
+      const p = byId.get(n.id)!;
+      if (!p.familyId || !famById.has(p.familyId) || anchors.has(p.familyId)) continue;
+      const top = topmost(n.id);
+      if (top.id === n.id || claimed.has(top.id)) continue;
+      const unit = build(top.id);
+      placeBlock(unit, n.depth - top.up, n.x - unit.width / 2, { familyId: p.familyId, x: n.x });
+      progress = true;
+      break;
+    }
+  }
+
+  // 3. Anyone still unplaced (disconnected) becomes a small tree on the right.
+  for (const p of [...people].sort(sortP)) {
+    if (claimed.has(p.id)) continue;
+    const start = topmost(p.id);
+    const unit = build(start.id);
+    placeBlock(unit, -start.up, extentRight() + BLOCK_GAP * 2);
+  }
+
+  // 4. Every placed person whose birth family is placed gets a branch from it —
+  //    this connects married-in people to their lineage (and cousin marriages).
+  const linked = new Set(branches.map((b) => `${b.familyId}:${b.childId}`));
+  for (const n of nodes.values()) {
+    const fid = byId.get(n.id)?.familyId;
+    if (!fid) continue;
+    const anchor = anchors.get(fid);
+    if (!anchor || linked.has(`${fid}:${n.id}`)) continue;
+    branches.push({ familyId: fid, childId: n.id, from: anchor, to: { x: n.x, y: n.y - NODE_H / 2 }, depth: anchor.depth });
   }
 
   const bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };

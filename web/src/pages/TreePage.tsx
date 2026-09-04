@@ -18,7 +18,7 @@ import { loadMe, loadToken, saveMe, saveToken } from '../util';
 type SheetState =
   | { kind: 'password' }
   | { kind: 'person'; id: string }
-  | { kind: 'form'; mode: 'root' | 'partner' | 'child' | 'parent' | 'edit'; personId?: string; familyId?: string }
+  | { kind: 'form'; mode: 'root' | 'partner' | 'child' | 'parent' | 'edit'; personId?: string; familyId?: string | 'new' }
   | { kind: 'pickFamily'; personId: string }
   | { kind: 'delete'; personId: string }
   | { kind: 'settings' }
@@ -142,8 +142,8 @@ export function TreePage({ id, mode }: Props) {
   const startAddChild = (pid: string) => {
     if (!data) return;
     const fams = M.familiesOf(data, pid);
-    if (fams.length > 1) setSheet({ kind: 'pickFamily', personId: pid });
-    else setSheet({ kind: 'form', mode: 'child', personId: pid, familyId: fams[0]?.id });
+    if (fams.length > 0) setSheet({ kind: 'pickFamily', personId: pid });
+    else setSheet({ kind: 'form', mode: 'child', personId: pid, familyId: 'new' });
   };
 
   if (store.loadError) {
@@ -298,7 +298,7 @@ export function TreePage({ id, mode }: Props) {
       {sheet?.kind === 'pickFamily' && (
         <Sheet onClose={closeSheet}>
           <h2>Child with whom?</h2>
-          <p className="lede">{peopleMap.get(sheet.personId)?.name} has more than one partner.</p>
+          <p className="lede">Who is the other parent of {peopleMap.get(sheet.personId)?.name}'s child?</p>
           <div className="stack">
             {M.familiesOf(data, sheet.personId).map((f) => {
               const partner = M.partnerIn(data, f, sheet.personId);
@@ -308,10 +308,16 @@ export function TreePage({ id, mode }: Props) {
                   className="btn btn-secondary"
                   onClick={() => setSheet({ kind: 'form', mode: 'child', personId: sheet.personId, familyId: f.id })}
                 >
-                  {partner ? `With ${partner.name}` : 'On their own'}
+                  {partner ? partner.name : 'No other parent listed (existing)'}
                 </button>
               );
             })}
+            <button
+              className="btn btn-secondary"
+              onClick={() => setSheet({ kind: 'form', mode: 'child', personId: sheet.personId, familyId: 'new' })}
+            >
+              Someone not in the tree
+            </button>
             <button className="btn btn-quiet" onClick={closeSheet}>
               Cancel
             </button>
@@ -370,7 +376,7 @@ function newPersonId(changes: Changes | undefined, before: Set<string>): string 
 function formCopy(
   mode: 'root' | 'partner' | 'child' | 'parent' | 'edit',
   person: Person | undefined,
-  familyId: string | undefined,
+  familyId: string | 'new' | undefined,
   data: TreeData,
 ): { title: string; lede?: string; submitLabel: string } {
   const who = person?.name ?? '';
@@ -380,15 +386,22 @@ function formCopy(
     case 'partner':
       return { title: `Partner of ${who}`, submitLabel: 'Add partner' };
     case 'child': {
-      const fam = familyId ? M.familyById(data, familyId) : undefined;
+      const fam = familyId && familyId !== 'new' ? M.familyById(data, familyId) : undefined;
       const other = fam && person ? M.partnerIn(data, fam, person.id) : undefined;
       return {
         title: `Child of ${who}${other ? ` & ${other.name}` : ''}`,
         submitLabel: 'Add child',
       };
     }
-    case 'parent':
-      return { title: `Parent of ${who}`, lede: 'They become the new root of the tree.', submitLabel: 'Add parent' };
+    case 'parent': {
+      const isRoot = person ? M.isRoot(data, person.id) : false;
+      const hasOne = !!person?.familyId;
+      return {
+        title: `Parent of ${who}`,
+        lede: hasOne ? 'Their other parent.' : isRoot ? 'They become the new root of the tree.' : 'Their family tree grows beside this one.',
+        submitLabel: 'Add parent',
+      };
+    }
     case 'edit':
       return { title: 'Edit person', submitLabel: 'Save' };
   }
@@ -427,7 +440,7 @@ function PersonDetails({ data, person, editing, isMe, relation, onSetMe, onGoTo,
   const parents = M.parentsOf(data, person.id);
   const partners = M.partnersOf(data, person.id);
   const children = M.familiesOf(data, person.id).flatMap((f) => M.childrenOf(data, f.id));
-  const canHaveParent = !person.familyId && M.isRoot(data, person.id);
+  const canHaveParent = M.canAddParent(data, person.id);
 
   const names = (list: Person[]) =>
     list.map((p, i) => (
@@ -529,6 +542,7 @@ function DeleteSheet({
   if (!person) return null;
   const plan = M.planDelete(data, personId);
   const removed = [...plan.people].filter((pid) => pid !== personId).map((pid) => M.personById(data, pid)!).filter(Boolean);
+  const detached = [...plan.detached].map((pid) => M.personById(data, pid)!).filter(Boolean);
   const keptChildren = M.familiesOf(data, personId)
     .filter((f) => !plan.families.has(f.id))
     .flatMap((f) => M.childrenOf(data, f.id));
@@ -558,7 +572,12 @@ function DeleteSheet({
           {survivingPartners.map((p) => p.name).join(' and ')}.
         </p>
       )}
-      {removed.length === 0 && keptChildren.length === 0 && <p className="subtle">This can't be undone.</p>}
+      {detached.length > 0 && (
+        <p className="subtle" style={{ marginTop: 10 }}>
+          {detached.map((p) => p.name).join(', ')} {detached.length === 1 ? 'stays' : 'stay'} in the tree through {detached.length === 1 ? 'their' : 'their'} partner, without parents listed.
+        </p>
+      )}
+      {removed.length === 0 && keptChildren.length === 0 && detached.length === 0 && <p className="subtle">This can't be undone.</p>}
     </Confirm>
   );
 }
