@@ -671,6 +671,7 @@ input[type='date']:focus {
   fill: none;
   stroke: var(--bark);
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 /* Couple bough: solid wood, paler than bloodline branches, with a dashed
    grain so the graft reads at a glance. */
@@ -679,6 +680,7 @@ input[type='date']:focus {
   stroke: #a08469;
   stroke-width: 7;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .bough-grain {
   fill: none;
