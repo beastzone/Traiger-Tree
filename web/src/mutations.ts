@@ -1,4 +1,4 @@
-import type { Changes, Family, Person, TreeData } from './types';
+import type { Changes, Family, Person, PersonInput, TreeData } from './types';
 import { emptyChanges } from './types';
 
 export interface Result {
@@ -55,8 +55,12 @@ function withPeople(data: TreeData, people: Person[]): TreeData {
   return { ...data, people };
 }
 
-export function addRoot(data: TreeData, name: string, photo: string | null): Result {
-  const person: Person = { id: newId(), name, photo, familyId: null, sortOrder: 0 };
+function blank(input: PersonInput, familyId: string | null, sortOrder: number): Person {
+  return { id: newId(), familyId, sortOrder, ...input };
+}
+
+export function addRoot(data: TreeData, input: PersonInput): Result {
+  const person = blank(input, null, 0);
   const changes = emptyChanges();
   changes.people.set(person.id, person);
   changes.rootId = person.id;
@@ -66,9 +70,9 @@ export function addRoot(data: TreeData, name: string, photo: string | null): Res
   };
 }
 
-export function addPartner(data: TreeData, personId: string, name: string, photo: string | null): Result {
+export function addPartner(data: TreeData, personId: string, input: PersonInput): Result {
   const changes = emptyChanges();
-  const partner: Person = { id: newId(), name, photo, familyId: null, sortOrder: 0 };
+  const partner = blank(input, null, 0);
   changes.people.set(partner.id, partner);
 
   const mine = familiesOf(data, personId);
@@ -95,13 +99,7 @@ export function addPartner(data: TreeData, personId: string, name: string, photo
  * Add a child to a person. When the person is in several couples the caller
  * must say which one via `familyId`.
  */
-export function addChild(
-  data: TreeData,
-  personId: string,
-  name: string,
-  photo: string | null,
-  familyId?: string,
-): Result {
+export function addChild(data: TreeData, personId: string, input: PersonInput, familyId?: string): Result {
   const changes = emptyChanges();
   let families = data.families;
   let family = familyId ? familyById(data, familyId) : undefined;
@@ -116,23 +114,21 @@ export function addChild(
     changes.families.set(family.id, family);
   }
   const siblings = childrenOf(data, family.id);
-  const child: Person = {
-    id: newId(),
-    name,
-    photo,
-    familyId: family.id,
-    sortOrder: siblings.reduce((m, s) => Math.max(m, s.sortOrder + 1), 0),
-  };
+  const child = blank(
+    input,
+    family.id,
+    siblings.reduce((m, s) => Math.max(m, s.sortOrder + 1), 0),
+  );
   changes.people.set(child.id, child);
   return { data: { ...data, people: [...data.people, child], families }, changes };
 }
 
 /** Grow the tree downward (toward the roots): give the root a parent. */
-export function addParent(data: TreeData, personId: string, name: string, photo: string | null): Result {
+export function addParent(data: TreeData, personId: string, input: PersonInput): Result {
   const me = personById(data, personId);
   if (!me || me.familyId) throw new Error('only a person without parents can be given one');
   const changes = emptyChanges();
-  const parent: Person = { id: newId(), name, photo, familyId: null, sortOrder: 0 };
+  const parent = blank(input, null, 0);
   const fam: Family = { id: newId(), partnerA: parent.id, partnerB: null, sortOrder: 0 };
   const updatedMe: Person = { ...me, familyId: fam.id };
   changes.people.set(parent.id, parent);
@@ -147,7 +143,7 @@ export function addParent(data: TreeData, personId: string, name: string, photo:
   return { data: next, changes };
 }
 
-export function updatePerson(data: TreeData, id: string, patch: { name?: string; photo?: string | null }): Result {
+export function updatePerson(data: TreeData, id: string, patch: Partial<PersonInput>): Result {
   const me = personById(data, id);
   if (!me) throw new Error('person not found');
   const updated: Person = { ...me, ...patch };

@@ -1,4 +1,4 @@
-# Traiger Tree
+# Family Tree Builder (Traiger Tree)
 
 A shared, mobile-first family tree. Anyone can plant a tree; each tree can be
 locked with an edit password. Leaves are people, couples sit side by side

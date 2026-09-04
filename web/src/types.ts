@@ -1,3 +1,5 @@
+export type Gender = 'f' | 'm' | null;
+
 export interface Person {
   id: string;
   name: string;
@@ -5,6 +7,20 @@ export interface Person {
   /** The family (couple) this person was born into, if any. */
   familyId: string | null;
   sortOrder: number;
+  /** YYYY-MM-DD */
+  birthDate: string | null;
+  /** YYYY-MM-DD, null while living */
+  deathDate: string | null;
+  /** How relationship words are phrased: 'f' → mother/sister, 'm' → father/brother, null → parent/sibling. */
+  gender: Gender;
+}
+
+export interface PersonInput {
+  name: string;
+  photo: string | null;
+  birthDate: string | null;
+  deathDate: string | null;
+  gender: Gender;
 }
 
 export interface Family {

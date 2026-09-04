@@ -29,6 +29,9 @@ type PersonRow = {
   sort_order: number;
   created_at: number;
   updated_at: number;
+  birth_date: string | null;
+  death_date: string | null;
+  gender: string | null;
 };
 
 type FamilyRow = {
@@ -91,6 +94,22 @@ function cleanPhoto(v: unknown): string | null {
   if (typeof v !== 'string') bad('photo must be a string');
   if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v)) bad('photo must be a base64 image data URL');
   if (v.length > MAX_PHOTO) bad('photo is too large');
+  return v;
+}
+
+function cleanDate(v: unknown, label: string): string | null {
+  if (v == null || v === '') return null;
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) bad(`${label} must be a YYYY-MM-DD date`);
+  const [y, m, d] = v.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) bad(`${label} is not a real date`);
+  if (y < 1000) bad(`${label} is too far in the past`);
+  return v;
+}
+
+function cleanGender(v: unknown): string | null {
+  if (v == null || v === '') return null;
+  if (v !== 'f' && v !== 'm') bad('gender must be "f", "m" or empty');
   return v;
 }
 
@@ -165,7 +184,16 @@ function publicTree(t: TreeRow) {
 }
 
 function publicPerson(p: PersonRow) {
-  return { id: p.id, name: p.name, photo: p.photo, familyId: p.family_id, sortOrder: p.sort_order };
+  return {
+    id: p.id,
+    name: p.name,
+    photo: p.photo,
+    familyId: p.family_id,
+    sortOrder: p.sort_order,
+    birthDate: p.birth_date,
+    deathDate: p.death_date,
+    gender: p.gender,
+  };
 }
 
 function publicFamily(f: FamilyRow) {
@@ -328,14 +356,18 @@ async function applyChanges(req: Request, env: Env, id: string): Promise<Respons
     if (!isId(p.id)) bad('person id is invalid');
     const familyId = p.familyId == null ? null : p.familyId;
     if (familyId !== null && !isId(familyId)) bad('person familyId is invalid');
+    const birth = cleanDate(p.birthDate, 'birthDate');
+    const death = cleanDate(p.deathDate, 'deathDate');
+    if (birth && death && death < birth) bad('deathDate is before birthDate');
     stmts.push(
       env.DB.prepare(
-        `INSERT INTO people (id, tree_id, name, photo, family_id, sort_order, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?)
+        `INSERT INTO people (id, tree_id, name, photo, family_id, sort_order, created_at, updated_at, birth_date, death_date, gender)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET name = excluded.name, photo = excluded.photo, family_id = excluded.family_id,
-           sort_order = excluded.sort_order, updated_at = excluded.updated_at
+           sort_order = excluded.sort_order, updated_at = excluded.updated_at,
+           birth_date = excluded.birth_date, death_date = excluded.death_date, gender = excluded.gender
          WHERE people.tree_id = excluded.tree_id`,
-      ).bind(p.id, id, cleanName(p.name), cleanPhoto(p.photo), familyId, cleanInt(p.sortOrder), now, now),
+      ).bind(p.id, id, cleanName(p.name), cleanPhoto(p.photo), familyId, cleanInt(p.sortOrder), now, now, birth, death, cleanGender(p.gender)),
     );
   }
 

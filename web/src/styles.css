@@ -116,6 +116,81 @@ label {
 .field {
   margin-bottom: 16px;
 }
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+input[type='date'] {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--paper);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+input[type='date']:focus {
+  border-color: var(--sage-deep);
+}
+.segmented {
+  display: flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--paper);
+}
+.segmented button {
+  flex: 1;
+  min-height: 42px;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+.segmented button + button {
+  border-left: 1px solid var(--line-strong);
+}
+.segmented button.on {
+  background: var(--moss);
+  color: var(--cream);
+}
+.life {
+  color: var(--ink-soft);
+  font-size: 15px;
+  margin-top: 4px;
+}
+.life .age {
+  font-weight: 600;
+  color: var(--ink);
+}
+.relation-pill {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: hsl(26 72% 54% / 0.14);
+  color: hsl(22 70% 36%);
+  font-weight: 600;
+  font-size: 14px;
+}
+.btn.btn-me {
+  border-color: hsl(26 72% 54%);
+  color: hsl(22 70% 36%);
+  background: var(--paper);
+}
+.btn.btn-me:hover:not(:disabled) {
+  background: hsl(26 72% 54% / 0.1);
+}
+.search-results .sub {
+  display: block;
+  font-size: 12.5px;
+  color: var(--muted);
+}
 .field .hint {
   font-size: 13px;
   color: var(--muted);
@@ -592,18 +667,54 @@ label {
   dominant-baseline: central;
   pointer-events: none;
 }
-.branch {
+.branch path {
   fill: none;
   stroke: var(--bark);
   stroke-linecap: round;
 }
-.couple-line {
+/* Couple bough: solid wood, paler than bloodline branches, with a dashed
+   grain so the graft reads at a glance. */
+.bough-wood {
   fill: none;
-  stroke: var(--bark-deep);
-  stroke-width: 2;
-  stroke-dasharray: 2 6;
+  stroke: #a08469;
+  stroke-width: 7;
   stroke-linecap: round;
-  opacity: 0.8;
+}
+.bough-grain {
+  fill: none;
+  stroke: var(--cream);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 5;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+.bough-knot {
+  fill: var(--bark);
+}
+.leaf.me .leaf-outline {
+  stroke: var(--bark-deep);
+}
+.leaf-you {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 12px;
+  fill: #fbf8f2;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.leaf-tag rect {
+  fill: var(--cream);
+  stroke: var(--bark);
+  stroke-width: 1;
+}
+.leaf-tag text {
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  font-weight: 600;
+  fill: var(--bark-deep);
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
 }
 
 /* ---- sheets ---------------------------------------------------------------- */
