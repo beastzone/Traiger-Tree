@@ -279,20 +279,27 @@ export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
       onPointerCancel={onPointerUp}
     >
       <g ref={gRef}>
-        {layout.roots.map((id) => {
-          const n = layout.nodes.get(id)!;
-          const top = -n.y + NODE_H / 2 - 12;
-          const bottom = top + TRUNK_H;
-          return (
-            <g key={`trunk-${id}`}>
-              <ellipse cx={n.x} cy={bottom} rx={NODE_W * 0.55} ry={9} fill="#5b4334" opacity="0.13" />
-              <path
-                d={`M${n.x - 12},${top} C${n.x - 14},${top + 45} ${n.x - 22},${bottom - 20} ${n.x - 34},${bottom} L${n.x + 34},${bottom} C${n.x + 22},${bottom - 20} ${n.x + 14},${top + 45} ${n.x + 12},${top} Z`}
-                fill="#7b5c45"
-              />
-            </g>
-          );
-        })}
+        {(() => {
+          // Every lineage root gets a trunk down to one shared ground line, so a
+          // married-in family's tree stands beside the main one.
+          const rootNodes = layout.roots.map((id) => layout.nodes.get(id)!).filter(Boolean);
+          if (!rootNodes.length) return null;
+          const ground = Math.max(...rootNodes.map((n) => -n.y + NODE_H / 2 - 12)) + TRUNK_H;
+          return rootNodes.map((n) => {
+            const top = -n.y + NODE_H / 2 - 12;
+            const h = ground - top;
+            const flare = Math.min(34, 12 + h * 0.23);
+            return (
+              <g key={`trunk-${n.id}`}>
+                <ellipse cx={n.x} cy={ground} rx={NODE_W * 0.55} ry={9} fill="#5b4334" opacity="0.13" />
+                <path
+                  d={`M${n.x - 12},${top} C${n.x - 14},${top + h * 0.47} ${n.x - 22},${ground - h * 0.2} ${n.x - flare},${ground} L${n.x + flare},${ground} C${n.x + 22},${ground - h * 0.2} ${n.x + 14},${top + h * 0.47} ${n.x + 12},${top} Z`}
+                  fill="#7b5c45"
+                />
+              </g>
+            );
+          });
+        })()}
 
         {layout.couples.map((c) => {
           // A couple's stems meet in a low arc above their leaves: solid wood
@@ -323,7 +330,7 @@ export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
           const x2 = b.to.x;
           const y2 = -b.to.y;
           // One thin stroke per branch; thickness steps down by generation.
-          const width = Math.max(2.5, 7 - b.depth * 1.2);
+          const width = Math.max(2.5, 7 - Math.max(0, b.depth) * 1.2);
           return (
             <g key={`${b.familyId}-${b.childId}`} className="branch">
               <path d={branchPath(x1, y1, x2, y2)} strokeWidth={width} />
