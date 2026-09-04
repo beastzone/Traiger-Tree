@@ -7,7 +7,7 @@ import { PersonForm } from '../components/PersonForm';
 import { SearchBar } from '../components/SearchBar';
 import { Confirm, Sheet } from '../components/Sheet';
 import { TreeCanvas, type CanvasHandle } from '../components/TreeCanvas';
-import { lifeSummary } from '../dates';
+import { lifeSummary, yearsLabel } from '../dates';
 import { phrase, relationMap } from '../kinship';
 import { layoutTree } from '../layout';
 import * as M from '../mutations';
@@ -51,6 +51,24 @@ export function TreePage({ id, mode }: Props) {
   );
   const peopleMap = useMemo(() => new Map((data?.people ?? []).map((p) => [p.id, p])), [data]);
   const relations = useMemo(() => (data && meId && peopleMap.has(meId) ? relationMap(data, meId) : null), [data, meId, peopleMap]);
+
+  // Same-named people are told apart by parents/partner in search and by a
+  // birth year (or short ID) on the leaf.
+  const { context, disambiguators } = useMemo(() => {
+    const context = new Map<string, string>();
+    const disambiguators = new Map<string, string>();
+    if (!data) return { context, disambiguators };
+    const counts = new Map<string, number>();
+    for (const p of data.people) counts.set(p.name.toLowerCase(), (counts.get(p.name.toLowerCase()) ?? 0) + 1);
+    for (const p of data.people) {
+      const parents = M.parentsOf(data, p.id);
+      const partners = M.partnersOf(data, p.id);
+      if (parents.length) context.set(p.id, `child of ${parents.map((x) => x.name).join(' & ')}`);
+      else if (partners.length) context.set(p.id, `partner of ${partners.map((x) => x.name).join(', ')}`);
+      if ((counts.get(p.name.toLowerCase()) ?? 0) > 1) disambiguators.set(p.id, yearsLabel(p.birthDate, p.deathDate) ?? `#${shortId(p.id)}`);
+    }
+    return { context, disambiguators };
+  }, [data]);
 
   const setMe = useCallback(
     (pid: string | null) => {
@@ -172,6 +190,7 @@ export function TreePage({ id, mode }: Props) {
         highlightId={highlightId}
         meId={meId}
         relations={relations}
+        disambiguators={disambiguators}
         onSelect={select}
       />
 
@@ -203,7 +222,7 @@ export function TreePage({ id, mode }: Props) {
         </div>
         {!empty && (
           <div style={{ display: 'flex', marginTop: 8 }}>
-            <SearchBar people={data.people} relations={relations} onPick={goTo} />
+            <SearchBar people={data.people} relations={relations} context={context} onPick={goTo} />
           </div>
         )}
       </div>
@@ -367,6 +386,11 @@ export function TreePage({ id, mode }: Props) {
 
 // ---- pieces -------------------------------------------------------------------
 
+/** A short, stable reference shown to people so two "David Traiger"s can be told apart. */
+function shortId(id: string): string {
+  return id.replace(/-/g, '').slice(0, 6).toUpperCase();
+}
+
 function newPersonId(changes: Changes | undefined, before: Set<string>): string | null {
   if (!changes) return null;
   for (const [pid, p] of changes.people) if (p && !before.has(pid)) return pid;
@@ -467,6 +491,7 @@ function PersonDetails({ data, person, editing, isMe, relation, onSetMe, onGoTo,
           )}
           {!isMe && relation && <div className="relation-pill">{phrase(relation)}</div>}
           {isMe && <div className="relation-pill">This is you</div>}
+          <div className="person-id" title="Unique reference for this person">ID {shortId(person.id)}</div>
         </div>
       </div>
       <ul className="relations">

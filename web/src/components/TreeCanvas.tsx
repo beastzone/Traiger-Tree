@@ -16,6 +16,8 @@ interface Props {
   highlightId: string | null;
   meId: string | null;
   relations: Map<string, string> | null;
+  /** personId → short label for people whose name is shared with someone else. */
+  disambiguators?: Map<string, string>;
   onSelect: (id: string | null) => void;
 }
 
@@ -51,7 +53,7 @@ const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t 
  * written straight to the DOM so dragging never waits on a React render.
  */
 export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
-  { layout, people, selectedId, highlightId, meId, relations, onSelect },
+  { layout, people, selectedId, highlightId, meId, relations, disambiguators, onSelect },
   ref,
 ) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -350,6 +352,7 @@ export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
               highlight={highlightId === n.id}
               isMe={meId === n.id}
               relation={relations?.get(n.id)}
+              disambiguator={disambiguators?.get(n.id)}
             />
           );
         })}

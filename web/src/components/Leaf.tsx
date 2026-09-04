@@ -83,9 +83,11 @@ interface Props {
   isMe: boolean;
   /** "first cousin once removed" etc., shown as a tag at the stem when someone is "you". */
   relation?: string;
+  /** Shown under the name when someone else in the tree has the same name: birth year or short ID. */
+  disambiguator?: string;
 }
 
-export const Leaf = memo(function Leaf({ node, person, selected, highlight, isMe, relation }: Props) {
+export const Leaf = memo(function Leaf({ node, person, selected, highlight, isMe, relation, disambiguator }: Props) {
   const { fill, stroke } = isMe ? ME_COLORS : leafColors(person.id);
   const lines = wrapName(person.name);
   const clipId = `clip-${person.id}`;
@@ -138,6 +140,11 @@ export const Leaf = memo(function Leaf({ node, person, selected, highlight, isMe
       {isMe && (
         <text className="leaf-you" x="0" y={lines.length > 1 ? 62 : 54}>
           you
+        </text>
+      )}
+      {!isMe && disambiguator && (
+        <text className="leaf-sub" x="0" y={lines.length > 1 ? 61 : 52}>
+          {disambiguator}
         </text>
       )}
 

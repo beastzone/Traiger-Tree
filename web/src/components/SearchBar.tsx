@@ -8,10 +8,12 @@ import { IconClose, IconSearch } from './Icons';
 interface Props {
   people: Person[];
   relations?: Map<string, string> | null;
+  /** One-line context per person ("child of A & B", "partner of C") so same-named people can be told apart. */
+  context?: Map<string, string>;
   onPick: (id: string) => void;
 }
 
-export function SearchBar({ people, relations, onPick }: Props) {
+export function SearchBar({ people, relations, context, onPick }: Props) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -110,9 +112,9 @@ export function SearchBar({ people, relations, onPick }: Props) {
               <Avatar name={p.name} photo={p.photo} />
               <span>
                 {p.name}
-                {(yearsLabel(p.birthDate, p.deathDate) || relations?.get(p.id)) && (
+                {(yearsLabel(p.birthDate, p.deathDate) || context?.get(p.id) || relations?.get(p.id)) && (
                   <span className="sub">
-                    {[yearsLabel(p.birthDate, p.deathDate), phrase(relations?.get(p.id))].filter(Boolean).join(' · ')}
+                    {[yearsLabel(p.birthDate, p.deathDate), context?.get(p.id), phrase(relations?.get(p.id))].filter(Boolean).join(' · ')}
                   </span>
                 )}
               </span>
