@@ -20,16 +20,17 @@ interface Props {
 }
 
 /**
- * A branch from (x1,y1) up to (x2,y2): a short vertical rise off the parent,
- * one straight diagonal, then a short vertical stub into the child's stem.
- * Straight segments with rounded joints — simple, but still reads as wood.
+ * A branch from (x1,y1) up to (x2,y2): one gentle bow. It leaves the parent
+ * leaning outward and bends upward into the child's stem, like a real branch
+ * reaching for light. Straight when the child is directly above.
  */
 function branchPath(x1: number, y1: number, x2: number, y2: number): string {
-  const gap = y1 - y2;
-  const rise = Math.min(34, gap * 0.3);
-  const stub = Math.min(22, gap * 0.2);
-  if (Math.abs(x2 - x1) < 1) return `M${x1},${y1} L${x2},${y2}`;
-  return `M${x1},${y1} L${x1},${y1 - rise} L${x2},${y2 + stub} L${x2},${y2}`;
+  const dx = x2 - x1;
+  const dy = y1 - y2;
+  if (Math.abs(dx) < 1) return `M${x1},${y1} L${x2},${y2}`;
+  const cx = x1 + dx * 0.62;
+  const cy = y1 - dy * 0.3;
+  return `M${x1},${y1} Q${cx},${cy} ${x2},${y2}`;
 }
 
 interface View {
@@ -294,9 +295,9 @@ export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
         })}
 
         {layout.couples.map((c) => {
-          // A couple's stems meet in a plain inverted V above their leaves.
-          // Solid wood like any branch, but paler with a dashed grain so the
-          // graft (not a bloodline) reads at a glance. Children grow from the peak.
+          // A couple's stems meet in a low arc above their leaves: solid wood
+          // like any branch, but paler with a dashed grain so the graft (not a
+          // bloodline) reads at a glance. Children grow from the peak.
           const left = c.a.x < c.b.x ? c.a : c.b;
           const right = c.a.x < c.b.x ? c.b : c.a;
           const yTop = -left.y - NODE_H / 2 + 14; // just inside each leaf's tip
@@ -304,12 +305,14 @@ export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
           const x2 = right.x - 16;
           const mx = (x1 + x2) / 2;
           const peak = -left.y - ARCH_RISE;
-          const d = `M${x1},${yTop} L${mx},${peak} L${x2},${yTop}`;
+          // Quadratic midpoint = ¼P0 + ½C + ¼P2 → choose C so the curve peaks at `peak`.
+          const cy = 2 * peak - yTop;
+          const d = `M${x1},${yTop} Q${mx},${cy} ${x2},${yTop}`;
           return (
             <g key={c.familyId} className="bough">
               <path className="bough-wood" d={d} />
               <path className="bough-grain" d={d} />
-              <circle cx={mx} cy={peak} r={5} className="bough-knot" />
+              <circle cx={mx} cy={peak} r={3.5} className="bough-knot" />
             </g>
           );
         })}
@@ -319,8 +322,8 @@ export const TreeCanvas = forwardRef<CanvasHandle, Props>(function TreeCanvas(
           const y1 = -b.from.y;
           const x2 = b.to.x;
           const y2 = -b.to.y;
-          // One stroke per branch; thickness steps down by generation.
-          const width = Math.max(4, 12 - b.depth * 2);
+          // One thin stroke per branch; thickness steps down by generation.
+          const width = Math.max(2.5, 7 - b.depth * 1.2);
           return (
             <g key={`${b.familyId}-${b.childId}`} className="branch">
               <path d={branchPath(x1, y1, x2, y2)} strokeWidth={width} />
