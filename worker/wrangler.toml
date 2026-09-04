@@ -1,0 +1,12 @@
+name = "traiger-tree-api"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "traiger-tree"
+database_id = "19d7c44a-930d-4303-bae0-920be09687aa"
+
+[observability]
+enabled = true
