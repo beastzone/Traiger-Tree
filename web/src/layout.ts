@@ -54,11 +54,18 @@ export interface Layout {
  * other partners…) on one level, with each family's children hanging above.
  */
 interface Unit {
+  /** The person this unit was built from; a block's trunk stands under them. */
+  root: string;
   slots: string[];
   blocks: { family: Family; children: Unit[] }[];
   width: number;
   childrenWidth: number;
 }
+
+/** Horizontal half-width reserved under a root for its trunk and ground shadow. */
+const TRUNK_HALF_W = 80;
+/** How many generations below a root its trunk zone is kept clear. */
+const TRUNK_DEPTHS = 6;
 
 export function layoutTree(people: Person[], families: Family[], rootId: string | null): Layout {
   const byId = new Map(people.map((p) => [p.id, p]));
@@ -146,7 +153,7 @@ export function layoutTree(people: Person[], families: Family[], rootId: string 
       family: f,
       children: (childrenOf.get(f.id) ?? []).filter((k) => !claimed.has(k.id)).map((k) => build(k.id)),
     }));
-    const unit: Unit = { slots, blocks, width: 0, childrenWidth: 0 };
+    const unit: Unit = { root: pid, slots, blocks, width: 0, childrenWidth: 0 };
     measure(unit);
     return unit;
   }
@@ -168,10 +175,19 @@ export function layoutTree(people: Person[], families: Family[], rootId: string 
   // ---- place ---------------------------------------------------------------
 
   interface Placed {
+    rootId: string;
     nodeIds: string[];
     familyIds: string[];
     coupleFrom: number;
     branchFrom: number;
+  }
+
+  /** The x-intervals a root's trunk needs clear, per depth, for a given shift. */
+  function trunkZone(p: Placed, dx: number): [number, number, number][] {
+    const r = nodes.get(p.rootId)!;
+    const out: [number, number, number][] = [];
+    for (let d = r.depth; d > r.depth - TRUNK_DEPTHS; d--) out.push([d, r.x + dx - TRUNK_HALF_W, r.x + dx + TRUNK_HALF_W]);
+    return out;
   }
 
   function place(u: Unit, left: number, depth: number, out: Placed) {
@@ -233,37 +249,46 @@ export function layoutTree(people: Person[], families: Family[], rootId: string 
       n.x += dx;
     }
     for (const fid of p.familyIds) anchors.get(fid)!.x += dx;
+    // A branch's `from` *is* the shared anchor object (already moved above);
+    // only its `to` point is its own.
     for (let i = p.branchFrom; i < branches.length; i++) {
-      branches[i].from = { ...branches[i].from, x: branches[i].from.x + dx };
       branches[i].to = { ...branches[i].to, x: branches[i].to.x + dx };
     }
     // Couple links reference node objects, so they move with them.
   }
 
   function occupy(p: Placed) {
+    const add = (depth: number, lo: number, hi: number) => {
+      const list = occupied.get(depth) ?? [];
+      list.push([lo, hi]);
+      occupied.set(depth, list);
+    };
     for (const id of p.nodeIds) {
       const n = nodes.get(id)!;
-      const list = occupied.get(n.depth) ?? [];
-      list.push([n.x - NODE_W / 2, n.x + NODE_W / 2]);
-      occupied.set(n.depth, list);
+      add(n.depth, n.x - NODE_W / 2, n.x + NODE_W / 2);
     }
+    for (const [d, lo, hi] of trunkZone(p, 0)) add(d, lo, hi);
+  }
+
+  function clear(depth: number, lo: number, hi: number): boolean {
+    for (const [a, b] of occupied.get(depth) ?? []) {
+      if (!(hi + SIBLING_GAP <= a || b + SIBLING_GAP <= lo)) return false;
+    }
+    return true;
   }
 
   function fits(p: Placed, dx: number): boolean {
     for (const id of p.nodeIds) {
       const n = nodes.get(id)!;
-      const lo = n.x + dx - NODE_W / 2;
-      const hi = n.x + dx + NODE_W / 2;
-      for (const [a, b] of occupied.get(n.depth) ?? []) {
-        if (!(hi + SIBLING_GAP <= a || b + SIBLING_GAP <= lo)) return false;
-      }
+      if (!clear(n.depth, n.x + dx - NODE_W / 2, n.x + dx + NODE_W / 2)) return false;
     }
+    for (const [d, lo, hi] of trunkZone(p, dx)) if (!clear(d, lo, hi)) return false;
     return true;
   }
 
   /** Place a unit as its own block, as close to `desiredLeft` as the others allow. */
   function placeBlock(u: Unit, depth: number, desiredLeft: number, anchorHint?: { familyId: string; x: number }) {
-    const out: Placed = { nodeIds: [], familyIds: [], coupleFrom: couples.length, branchFrom: branches.length };
+    const out: Placed = { rootId: u.root, nodeIds: [], familyIds: [], coupleFrom: couples.length, branchFrom: branches.length };
     place(u, 0, depth, out);
     // Where would we like to be? Under the person this lineage connects to, if given.
     let want = desiredLeft;
@@ -281,7 +306,7 @@ export function layoutTree(people: Person[], families: Family[], rootId: string 
     if (chosen === null) chosen = extentRight() + BLOCK_GAP * 2;
     translate(out, chosen);
     occupy(out);
-    roots.push(u.slots[0]);
+    roots.push(u.root);
   }
 
   function extentRight(): number {
